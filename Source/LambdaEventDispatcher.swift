@@ -28,6 +28,7 @@ public class LambdaEventDispatcher {
     
     public func start(asyncRun: Bool = true) {
         isRunning = true
+        run(asyncRun: asyncRun)
     }
     
     private func run(asyncRun: Bool) {
