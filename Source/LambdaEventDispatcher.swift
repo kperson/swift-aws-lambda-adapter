@@ -11,6 +11,7 @@ public class LambdaEventDispatcher {
 
     let handler: LambdaEventHandler
     let runtimeAPI: String
+    var isRunning: Bool = false
     
     let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 3)
     
@@ -21,26 +22,42 @@ public class LambdaEventDispatcher {
             ?? "localhost:8080"
     }
     
-    public func run() {
-        let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
-        let cycle = request(method: "GET", url: nextEndpoint, body: nil)
-        .then { res -> EventLoopFuture<Void> in
-            if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
-                return self.handleJob(data: res.body, requestId: requestId)
+    public func stop() {
+        isRunning = false
+    }
+    
+    public func start(asyncRun: Bool = true) {
+        isRunning = true
+    }
+    
+    private func run(asyncRun: Bool) {
+        if isRunning {
+            let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
+            let cycle = request(method: "GET", url: nextEndpoint, body: nil)
+            .then { res -> EventLoopFuture<Void> in
+                if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
+                    return self.handleJob(data: res.body, requestId: requestId)
+                }
+                else {
+                    return self.eventLoopGroup.next().newSucceededFuture(result: Void())
+                }
+            }
+            if asyncRun {
+                cycle.whenComplete {
+                    self.run(asyncRun: asyncRun)
+                }
             }
             else {
-                return self.eventLoopGroup.next().newSucceededFuture(result: Void())
+                defer {
+                    run(asyncRun: asyncRun)
+                }
+                do {
+                    try cycle.wait()
+                }
+                catch let error {
+                    print("unhandled error: \(error)")
+                }
             }
-        }
-        
-        defer {
-            run()
-        }
-        do {
-            try cycle.wait()
-        }
-        catch let error {
-            print("unhandled error: \(error)")
         }
     }
     
