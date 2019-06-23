@@ -3,7 +3,7 @@ import NIO
 
 public protocol LambdaEventHandler {
     
-    func handle(data: [String: Any], eventLoop: EventLoop) -> EventLoopFuture<[String : Any]>
+    func handle(data: [String: Any], eventLoopGroup: EventLoopGroup) -> EventLoopFuture<[String : Any]>
     
 }
 
@@ -24,12 +24,12 @@ public class LambdaEventDispatcher {
     public func run() {
         let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
         let cycle = request(method: "GET", url: nextEndpoint, body: nil)
-        .flatMap { res -> EventLoopFuture<Void> in
+        .then { res -> EventLoopFuture<Void> in
             if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
                 return self.handleJob(data: res.body, requestId: requestId)
             }
             else {
-                return self.eventLoopGroup.next().makeSucceededFuture(Void())
+                return self.eventLoopGroup.next().newSucceededFuture(result: Void())
             }
         }
         
@@ -50,9 +50,9 @@ public class LambdaEventDispatcher {
     ) -> EventLoopFuture<Void> {
         do {
             let map = try JSONSerialization.jsonObject(with: data, options: []) as! [String: Any]
-            return handler.handle(data: map, eventLoop: eventLoopGroup.next())
-                .flatMap { results in self.handleSuccessJob(response: results, requestId: requestId) }
-                .flatMapError { error in
+            return handler.handle(data: map, eventLoopGroup: eventLoopGroup.next())
+                .then { results in self.handleSuccessJob(response: results, requestId: requestId) }
+                .thenIfError { error in
                     self.handleFailedJob(
                         response: LambdaEventDispatcher.errorResponse(error: error),
                         requestId: requestId
@@ -108,7 +108,7 @@ public class LambdaEventDispatcher {
         body: Data?,
         timeout: TimeInterval = 60
     ) -> EventLoopFuture<RequestResponse> {
-        let p = eventLoopGroup.next().makePromise(of: RequestResponse.self)
+        let p = eventLoopGroup.next().newPromise(of: RequestResponse.self)
         var request = URLRequest(
             url: URL(string: url)!,
             cachePolicy: .useProtocolCachePolicy,
@@ -121,7 +121,7 @@ public class LambdaEventDispatcher {
         let session = URLSession.shared
         let task = session.dataTask(with: request, completionHandler: { data, response, error -> Void in
             if let e = error {
-                p.fail(e)
+                p.fail(error: e)
             }
             else {
                 let httpResponse = response as! HTTPURLResponse
@@ -131,7 +131,7 @@ public class LambdaEventDispatcher {
                     responseHeaders[hk.lowercased()] = headerValue
                 }
                 let res = RequestResponse(statusCode: httpResponse.statusCode, body: data!, headers: responseHeaders)
-                p.succeed(res)
+                p.succeed(result: res)
             }
         })
         task.resume()
