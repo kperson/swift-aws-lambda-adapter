@@ -1,5 +1,4 @@
 import Foundation
-import NIOHTTPClient
 import NIO
 
 public protocol LambdaEventHandler {
@@ -13,10 +12,7 @@ public class LambdaEventDispatcher {
     let handler: LambdaEventHandler
     let runtimeAPI: String
     
-    let httpClient = HTTPClient(
-        eventLoopGroupProvider: .createNew,
-        configuration: HTTPClient.Configuration(followRedirects: true)
-    )
+    let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 3)
     
     public init(handler: LambdaEventHandler, runtimeAPI: String? = nil) {
         self.handler = handler
@@ -27,18 +23,13 @@ public class LambdaEventDispatcher {
     
     public func run() {
         let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
-        let cycle = httpClient.get(
-            url: nextEndpoint,
-            timeout: HTTPClient.Timeout(
-                connect: TimeAmount.milliseconds(Int64(2000)),
-                read: TimeAmount.microseconds(Int64(20000))
-            )
-        ).flatMap { res -> EventLoopFuture<Void> in
-            if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id"].first, let buffer = res.body {
-                return self.handleJob(data: buffer.data, requestId: requestId)
+        let cycle = request(method: "GET", url: nextEndpoint, body: nil)
+        .flatMap { res -> EventLoopFuture<Void> in
+            if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
+                return self.handleJob(data: res.body, requestId: requestId)
             }
             else {
-                return self.httpClient.eventLoopGroup.next().makeSucceededFuture(Void())
+                return self.eventLoopGroup.next().makeSucceededFuture(Void())
             }
         }
         
@@ -59,7 +50,7 @@ public class LambdaEventDispatcher {
     ) -> EventLoopFuture<Void> {
         do {
             let map = try JSONSerialization.jsonObject(with: data, options: []) as! [String: Any]
-            return handler.handle(data: map, eventLoop: httpClient.eventLoopGroup.next())
+            return handler.handle(data: map, eventLoop: eventLoopGroup.next())
                 .flatMap { results in self.handleSuccessJob(response: results, requestId: requestId) }
                 .flatMapError { error in
                     self.handleFailedJob(
@@ -99,7 +90,7 @@ public class LambdaEventDispatcher {
         endpoint: String
     ) -> EventLoopFuture<Void> {
         let data = try! JSONSerialization.data(withJSONObject: response, options: [])
-        return httpClient.post(url: endpoint, body: .data(data)).map { _ in Void() }
+        return request(method: "POST", url: endpoint, body: data).map { _  in Void() }
     }
     
     static func errorResponse(error: Error) -> [String: Any] {
@@ -109,6 +100,70 @@ public class LambdaEventDispatcher {
             "errorLocalizedDescription": error.localizedDescription,
             "errorDetails": errorText
         ]
+    }
+    
+    func request(
+        method: String,
+        url: String,
+        body: Data?,
+        timeout: TimeInterval = 60
+    ) -> EventLoopFuture<RequestResponse> {
+        let p = eventLoopGroup.next().makePromise(of: RequestResponse.self)
+        var request = URLRequest(
+            url: URL(string: url)!,
+            cachePolicy: .useProtocolCachePolicy,
+            timeoutInterval: timeout
+        )
+        request.httpMethod = method
+        
+        request.httpBody = body
+        
+        let session = URLSession.shared
+        let task = session.dataTask(with: request, completionHandler: { data, response, error -> Void in
+            if let e = error {
+                p.fail(e)
+            }
+            else {
+                let httpResponse = response as! HTTPURLResponse
+                var responseHeaders:Dictionary<String, Any> = [:]
+                for (headerKey, headerValue) in httpResponse.allHeaderFields {
+                    let hk = (headerKey as! String)
+                    responseHeaders[hk.lowercased()] = headerValue
+                }
+                let res = RequestResponse(statusCode: httpResponse.statusCode, body: data!, headers: responseHeaders)
+                p.succeed(res)
+            }
+        })
+        task.resume()
+        return p.futureResult
+    }
+    
+}
+
+
+public class RequestResponse {
+    
+    
+    public let statusCode: Int
+    public let body: Data
+    public let headers: Dictionary<String, Any>
+    
+    private var bodyText: String?
+    
+    init(statusCode: Int, body: Data, headers: Dictionary<String, Any>) {
+        self.statusCode = statusCode
+        self.body = body
+        self.headers = headers
+    }
+    
+    public var bodyAsText: String {
+        if let bodyT = self.bodyText {
+            return bodyT
+        }
+        else {
+            self.bodyText = NSString(data: body, encoding: String.Encoding.utf8.rawValue)! as String
+            return self.bodyText!
+        }
     }
     
 }

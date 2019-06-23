@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "AWSLambdaAdapter",
+    name: "aws-lambda-adapater",
     products: [
-        .library(name: "adapter", targets: ["AWSLambdaAdapter"])
+        .library(name: "AWSLambdaAdapter", targets: ["AWSLambdaAdapter"])
     ],
     dependencies: [
-        .package(url: "https://github.com/vapor/swift-nio-http-client.git", from: "0.0.0")
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0")
     ],
     targets: [
         .target(
             name: "AWSLambdaAdapter", 
             dependencies: [
-                "NIOHTTPClient"
+                "NIO"
             ],
             path: "./Source"
         )
