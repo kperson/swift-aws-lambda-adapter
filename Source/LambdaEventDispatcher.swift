@@ -26,39 +26,20 @@ public class LambdaEventDispatcher {
         isRunning = false
     }
     
-    public func start(asyncRun: Bool = true) {
-        isRunning = true
-        run(asyncRun: asyncRun)
-    }
-    
-    private func run(asyncRun: Bool) {
-        if isRunning {
-            let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
-            let cycle = request(method: "GET", url: nextEndpoint, body: nil)
-            .then { res -> EventLoopFuture<Void> in
-                if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
-                    return self.handleJob(data: res.body, requestId: requestId)
-                }
-                else {
-                    return self.eventLoopGroup.next().newSucceededFuture(result: Void())
-                }
-            }
-            if asyncRun {
-                cycle.whenComplete {
-                    self.run(asyncRun: asyncRun)
-                }
+    public func start() -> EventLoopFuture<Void> {
+        let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
+        return request(method: "GET", url: nextEndpoint, body: nil)
+        .then { res -> EventLoopFuture<Void> in
+            if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
+                return self.handleJob(data: res.body, requestId: requestId)
             }
             else {
-                defer {
-                    run(asyncRun: asyncRun)
-                }
-                do {
-                    try cycle.wait()
-                }
-                catch let error {
-                    print("unhandled error: \(error)")
-                }
+                return self.eventLoopGroup.next().newSucceededFuture(result: Void())
             }
+        }.then { _ in
+            self.start()
+        }.thenIfError { _ in
+            self.start()
         }
     }
     
