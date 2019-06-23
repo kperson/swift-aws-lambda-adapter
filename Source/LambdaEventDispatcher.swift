@@ -27,19 +27,29 @@ public class LambdaEventDispatcher {
     }
     
     public func start() -> EventLoopFuture<Void> {
-        let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
-        return request(method: "GET", url: nextEndpoint, body: nil)
-        .then { res -> EventLoopFuture<Void> in
-            if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
-                return self.handleJob(data: res.body, requestId: requestId)
+        isRunning = true
+        return run()
+    }
+    
+    private func run() -> EventLoopFuture<Void> {
+        if isRunning {
+            let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
+            return request(method: "GET", url: nextEndpoint, body: nil)
+            .then { res -> EventLoopFuture<Void> in
+                if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
+                    return self.handleJob(data: res.body, requestId: requestId)
+                }
+                else {
+                    return self.eventLoopGroup.next().newSucceededFuture(result: Void())
+                }
+            }.then { _ in
+                self.run()
+            }.thenIfError { _ in
+                self.run()
             }
-            else {
-                return self.eventLoopGroup.next().newSucceededFuture(result: Void())
-            }
-        }.then { _ in
-            self.start()
-        }.thenIfError { _ in
-            self.start()
+        }
+        else {
+            return eventLoopGroup.next().newSucceededFuture(result: Void())
         }
     }
     
