@@ -1,6 +1,13 @@
 import Foundation
 import NIO
 
+#if os(Linux)
+import Glibc
+#else
+import Darwin.C
+#endif
+
+
 public protocol LambdaEventHandler {
     
     func handle(data: [String: Any], eventLoopGroup: EventLoopGroup) -> EventLoopFuture<[String : Any]>
@@ -105,6 +112,7 @@ public class LambdaEventDispatcher {
     static func errorResponse(error: Error) -> [String: Any] {
         var errorText = ""
         print(error, to: &errorText)
+        fflush(stdout)
         return [
             "errorLocalizedDescription": error.localizedDescription,
             "errorDetails": errorText
