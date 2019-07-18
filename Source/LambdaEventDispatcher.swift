@@ -10,7 +10,7 @@ import Darwin.C
 
 public protocol LambdaEventHandler {
     
-    func handle(data: [String: Any], eventLoopGroup: EventLoopGroup) -> EventLoopFuture<[String : Any]>
+    func handle(data: [String: Any], headers: [String : Any], eventLoopGroup: EventLoopGroup) -> EventLoopFuture<[String : Any]>
     
 }
 
@@ -44,7 +44,7 @@ public class LambdaEventDispatcher {
             return request(method: "GET", url: nextEndpoint, body: nil)
             .then { res -> EventLoopFuture<Void> in
                 if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
-                    return self.handleJob(data: res.body, requestId: requestId)
+                    return self.handleJob(data: res.body, headers: res.headers, requestId: requestId)
                 }
                 else {
                     return self.eventLoopGroup.next().newSucceededFuture(result: Void())
@@ -62,11 +62,12 @@ public class LambdaEventDispatcher {
     
     private func handleJob(
         data: Data,
+        headers: [String : Any],
         requestId: String
     ) -> EventLoopFuture<Void> {
         do {
             let map = try JSONSerialization.jsonObject(with: data, options: []) as! [String: Any]
-            return handler.handle(data: map, eventLoopGroup: eventLoopGroup.next())
+            return handler.handle(data: map, headers: headers, eventLoopGroup: eventLoopGroup.next())
                 .then { results in self.handleSuccessJob(response: results, requestId: requestId) }
                 .thenIfError { error in
                     self.handleFailedJob(
