@@ -21,8 +21,14 @@ public class LambdaEventDispatcher {
     var isRunning: Bool = false
     
     let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 3)
+    let logger: BasicLambdaLogger
     
-    public init(handler: LambdaEventHandler, runtimeAPI: String? = nil) {
+    public init(
+        handler: LambdaEventHandler,
+        runtimeAPI: String? = nil,
+        logLevel: BasicLambdaLoggerLevel = .error
+    ) {
+        self.logger = BasicLambdaLogger(logLevel: logLevel)
         self.handler = handler
         self.runtimeAPI = runtimeAPI
             ?? ProcessInfo.processInfo.environment["AWS_LAMBDA_RUNTIME_API"]
@@ -41,18 +47,23 @@ public class LambdaEventDispatcher {
     private func run() -> EventLoopFuture<Void> {
         if isRunning {
             let nextEndpoint = "http://\(runtimeAPI)/2018-06-01/runtime/invocation/next"
+            logger.log(string: "making lambda event request: \(nextEndpoint)", level: .debug)
             return request(method: "GET", url: nextEndpoint, body: nil)
             .then { res -> EventLoopFuture<Void> in
                 if let requestId = res.headers["Lambda-Runtime-Aws-Request-Id".lowercased()] as? String {
+                    self.logger.log(string: "starting to handle lambda job: \(requestId)", level: .info)
                     return self.handleJob(data: res.body, headers: res.headers, requestId: requestId)
                 }
                 else {
+                    self.logger.log(string: "no job found", level: .debug)
                     return self.eventLoopGroup.next().newSucceededFuture(result: Void())
                 }
             }.then { _ in
-                self.run()
+                self.logger.log(string: "job complete, make another request", level: .debug)
+                return self.run()
             }.thenIfError { _ in
-                self.run()
+                self.logger.log(string: "no job request failed", level: .debug)
+                return self.run()
             }
         }
         else {
@@ -68,15 +79,19 @@ public class LambdaEventDispatcher {
         do {
             let map = try JSONSerialization.jsonObject(with: data, options: []) as! [String: Any]
             return handler.handle(data: map, headers: headers, eventLoopGroup: eventLoopGroup.next())
-                .then { results in self.handleSuccessJob(response: results, requestId: requestId) }
+                .then { results in
+                    self.logger.log(string: "job succeeded", level: .info)
+                    return self.handleSuccessJob(response: results, requestId: requestId) }
                 .thenIfError { error in
-                    self.handleFailedJob(
+                    self.logger.error(error: error, level: .warn)
+                    return self.handleFailedJob(
                         response: LambdaEventDispatcher.errorResponse(error: error),
                         requestId: requestId
                     )
                 }
         }
         catch let error {
+            self.logger.error(error: error, level: .error)
             return self.handleFailedJob(
                 response: LambdaEventDispatcher.errorResponse(error: error),
                 requestId: requestId
@@ -113,7 +128,6 @@ public class LambdaEventDispatcher {
     static func errorResponse(error: Error) -> [String: Any] {
         var errorText = ""
         print(error, to: &errorText)
-        fflush(stdout)
         return [
             "errorLocalizedDescription": error.localizedDescription,
             "errorDetails": errorText
@@ -133,7 +147,6 @@ public class LambdaEventDispatcher {
             timeoutInterval: timeout
         )
         request.httpMethod = method
-        
         request.httpBody = body
         
         let session = URLSession.shared
