@@ -20,7 +20,7 @@ public enum BasicLambdaLoggerLevel: Int {
     case warn = 2
     case error = 3
     
-    init(str: String) {
+    public init(str: String) {
         switch str.lowercased() {
         case "debug": self = .debug
         case "warn": self = .warn
@@ -29,7 +29,7 @@ public enum BasicLambdaLoggerLevel: Int {
         }
     }
     
-    var str: String {
+    public var str: String {
         switch self {
         case .debug: return "DEBUG"
         case .info: return "INFO"
