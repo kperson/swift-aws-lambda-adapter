@@ -59,10 +59,10 @@ public class LambdaEventDispatcher {
                     return self.eventLoopGroup.next().newSucceededFuture(result: Void())
                 }
             }.then { _ in
-                self.logger.log(string: "job complete, make another request", level: .debug)
+                self.logger.log(string: "job complete, making another request", level: .debug)
                 return self.run()
             }.thenIfError { _ in
-                self.logger.log(string: "no job request failed", level: .debug)
+                self.logger.log(string: "no job found, request failed", level: .debug)
                 return self.run()
             }
         }
@@ -83,7 +83,7 @@ public class LambdaEventDispatcher {
                     self.logger.log(string: "job succeeded", level: .info)
                     return self.handleSuccessJob(response: results, requestId: requestId) }
                 .thenIfError { error in
-                    self.logger.error(error: error, level: .warn)
+                    self.logger.error(error: error, level: .error)
                     return self.handleFailedJob(
                         response: LambdaEventDispatcher.errorResponse(error: error),
                         requestId: requestId

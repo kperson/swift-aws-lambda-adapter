@@ -72,7 +72,10 @@ class BasicLambdaLogger {
     ) {
         var errorText = ""
         print(error, to: &errorText)
-        log(string: errorText, level: level)
+        if level.rawValue >= logLevel.rawValue {
+            Swift.print("[\(level.str)] \(errorText) (\(file):\(function):\(line):\(column))")
+            fflush(stdout)
+        }
     }
     
 }
