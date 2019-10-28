@@ -20,7 +20,7 @@ public class LambdaEventDispatcher {
     let runtimeAPI: String
     var isRunning: Bool = false
     
-    let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 3)
+    let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
     let logger: BasicLambdaLogger
     
     public init(
