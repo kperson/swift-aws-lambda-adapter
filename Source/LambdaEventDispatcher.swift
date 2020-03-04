@@ -80,6 +80,8 @@ public class LambdaEventDispatcher {
         requestId: String
     ) -> EventLoopFuture<Void> {
         do {
+            
+            self.logger.log(string: "starting job: \(String(data: data, encoding: .utf8)!)", level: .debug)
             let map = try JSONSerialization.jsonObject(with: data, options: []) as! [String: Any]
             return handler.handle(data: map, headers: headers, eventLoopGroup: eventLoopGroup.next())
                 .then { results in
